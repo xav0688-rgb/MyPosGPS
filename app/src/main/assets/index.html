@@ -118,18 +118,15 @@ touch-action:manipulation;
 
 <!-- POPUP WP TYPE -->
 <div id="wpPopup">
-
   <div style="font-size:20px;font-weight:bold;text-align:center">
     Type de waypoint
   </div>
-
   <div class="wp-icons">
-    <div class="wp-icon" onclick="selectWP('CAMPING')">🏕️</div>
-    <div class="wp-icon" onclick="selectWP('SAUVAGE')">🌿</div>
+    <div class="wp-icon" onclick="selectWP('CAMPING')">🏡</div>
+    <div class="wp-icon" onclick="selectWP('SAUVAGE')">⛺️</div>
     <div class="wp-icon" onclick="selectWP('PICNIC')">🧺</div>
     <div class="wp-icon" onclick="selectWP('PHOTO')">📷</div>
   </div>
-
 </div>
 
 <script>
@@ -138,11 +135,11 @@ touch-action:manipulation;
 // CONFIG
 // ======================
 
-const USER_KEY       = "XP15";
-const DB_NAME        = "gps_logger_db";
-const STORE_NAME     = "positions";
+const USER_KEY          = "XP15";
+const DB_NAME           = "gps_logger_db";
+const STORE_NAME        = "positions";
 const AUTO_EXPORT_EVERY = 50;
-const ADDWP_TYPE     = 1;
+const ADDWP_TYPE        = 1;
 
 let db;
 let pendingWP = "none";
@@ -295,7 +292,7 @@ function savePosition(){
 
 
 // ======================
-// EXPORT JSON
+// EXPORT JSON — via pont Android natif
 // ======================
 
 function exportJSON(){
@@ -307,26 +304,30 @@ function exportJSON(){
   req.onsuccess = function(){
 
     const data = req.result;
-    if(data.length===0){
+
+    if(data.length === 0){
       alert("Aucun point à exporter.");
       return;
     }
 
-    const json = JSON.stringify(data,null,2);
-    const blob = new Blob([json],{type:"application/json"});
-    const url  = URL.createObjectURL(blob);
+    const json = JSON.stringify(data, null, 2);
 
-    const a        = document.createElement("a");
-    const filename = "gps_export_"+Date.now()+".json";
+    // Pont Android natif (MainActivity.java → ExportBridge)
+    if(window.AndroidExport){
+      window.AndroidExport.saveJSON(json);
+      document.getElementById("status").innerText =
+        "💾 Export envoyé au téléphone...";
 
-    a.href     = url;
-    a.download = filename;
-    a.click();
-
-    URL.revokeObjectURL(url);
-
-    document.getElementById("status").innerText =
-      "💾 Export : "+filename;
+    } else {
+      // Fallback navigateur classique (test sur PC)
+      const blob = new Blob([json],{type:"application/json"});
+      const url  = URL.createObjectURL(blob);
+      const a    = document.createElement("a");
+      a.href     = url;
+      a.download = "gps_export_"+Date.now()+".json";
+      a.click();
+      URL.revokeObjectURL(url);
+    }
   };
 }
 
@@ -340,20 +341,11 @@ function checkAutoExport(){
   const store = tx.objectStore(STORE_NAME);
   const req   = store.count();
   req.onsuccess = function(){
-    if(req.result % AUTO_EXPORT_EVERY===0){
+    if(req.result % AUTO_EXPORT_EVERY === 0){
       exportJSON();
     }
   };
 }
-
-
-// ======================
-// EXPORT FERMETURE
-// ======================
-
-window.addEventListener("beforeunload",function(){
-  exportJSON();
-});
 
 
 // ======================
@@ -383,7 +375,7 @@ function resetDatabase(){
       alert("Erreur suppression base");
     };
 
-  },500);
+  }, 500);
 }
 
 
@@ -391,9 +383,9 @@ function resetDatabase(){
 // BOUTONS
 // ======================
 
-document.getElementById("btnGps").addEventListener("click",handleGPS);
-document.getElementById("btnExport").addEventListener("click",exportJSON);
-document.getElementById("btnReset").addEventListener("click",resetDatabase);
+document.getElementById("btnGps").addEventListener("click", handleGPS);
+document.getElementById("btnExport").addEventListener("click", exportJSON);
+document.getElementById("btnReset").addEventListener("click", resetDatabase);
 
 </script>
 
