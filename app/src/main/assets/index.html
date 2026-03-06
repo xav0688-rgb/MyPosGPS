@@ -1,0 +1,401 @@
+<!DOCTYPE html>
+<html lang="fr">
+
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0, user-scalable=no">
+<title>MyPos GPS Logger</title>
+
+<style>
+
+*{box-sizing:border-box;-webkit-tap-highlight-color:transparent;}
+
+body{
+font-family:Arial;
+background:#f4f4f4;
+margin:0;
+height:100vh;
+overflow:hidden;
+}
+
+.memo-container{
+position:fixed;
+top:50%;
+left:50%;
+transform:translate(-50%,-50%);
+display:flex;
+flex-direction:column;
+gap:20px;
+align-items:center;
+width:90%;
+max-width:400px;
+}
+
+.gps-btn{
+padding:18px 30px;
+font-size:20px;
+background:#1976d2;
+color:white;
+border:none;
+border-radius:30px;
+cursor:pointer;
+box-shadow:0 6px 12px rgba(0,0,0,0.3);
+width:100%;
+touch-action:manipulation;
+}
+
+.export-btn{background:#2e7d32;}
+.reset-btn{background:#ef6c00;}
+
+.counter{font-size:22px;font-weight:bold;}
+
+.status{
+font-size:16px;
+text-align:center;
+color:#555;
+min-height:24px;
+}
+
+#wpPopup{
+position:fixed;
+top:50%;
+left:50%;
+transform:translate(-50%,-50%);
+background:white;
+padding:30px;
+border-radius:20px;
+box-shadow:0 0 20px rgba(0,0,0,0.4);
+display:none;
+z-index:2000;
+width:85%;
+max-width:360px;
+}
+
+.wp-icons{
+display:flex;
+gap:20px;
+margin-top:20px;
+justify-content:center;
+flex-wrap:wrap;
+}
+
+.wp-icon{
+font-size:44px;
+cursor:pointer;
+padding:12px;
+border-radius:12px;
+touch-action:manipulation;
+}
+
+.wp-icon:active{background:#eee;}
+
+</style>
+</head>
+
+<body>
+
+<div class="memo-container">
+
+  <button id="btnGps" class="gps-btn">
+    📍 Enregistrer position
+  </button>
+
+  <button id="btnExport" class="gps-btn export-btn">
+    💾 Export JSON
+  </button>
+
+  <div class="counter">
+    Points enregistrés : <span id="count">0</span>
+  </div>
+
+  <div id="status" class="status"></div>
+
+  <button id="btnReset" class="gps-btn reset-btn">
+    ⚠️ RAZ complète
+  </button>
+
+</div>
+
+<!-- POPUP WP TYPE -->
+<div id="wpPopup">
+
+  <div style="font-size:20px;font-weight:bold;text-align:center">
+    Type de waypoint
+  </div>
+
+  <div class="wp-icons">
+    <div class="wp-icon" onclick="selectWP('CAMPING')">🏕️</div>
+    <div class="wp-icon" onclick="selectWP('SAUVAGE')">🌿</div>
+    <div class="wp-icon" onclick="selectWP('PICNIC')">🧺</div>
+    <div class="wp-icon" onclick="selectWP('PHOTO')">📷</div>
+  </div>
+
+</div>
+
+<script>
+
+// ======================
+// CONFIG
+// ======================
+
+const USER_KEY       = "XP15";
+const DB_NAME        = "gps_logger_db";
+const STORE_NAME     = "positions";
+const AUTO_EXPORT_EVERY = 50;
+const ADDWP_TYPE     = 1;
+
+let db;
+let pendingWP = "none";
+
+
+// ======================
+// TIMESTAMP MYSQL
+// ======================
+
+function mysqlTimestamp(){
+  const d   = new Date();
+  const pad = n => n.toString().padStart(2,"0");
+  return d.getFullYear()+"-"+
+         pad(d.getMonth()+1)+"-"+
+         pad(d.getDate())+" "+
+         pad(d.getHours())+":"+
+         pad(d.getMinutes())+":"+
+         pad(d.getSeconds());
+}
+
+function formatFR(mysqlTime){
+  const parts = mysqlTime.split(" ");
+  const date  = parts[0].split("-");
+  const time  = parts[1];
+  return time+" le "+date[2]+"/"+date[1]+"/"+date[0];
+}
+
+
+// ======================
+// INIT DATABASE
+// ======================
+
+function initDB(){
+  const request = indexedDB.open(DB_NAME,1);
+
+  request.onupgradeneeded = function(e){
+    db = e.target.result;
+    db.createObjectStore(STORE_NAME,{keyPath:"id",autoIncrement:true});
+  };
+
+  request.onsuccess = function(e){
+    db = e.target.result;
+    updateCounter();
+  };
+
+  request.onerror = function(){
+    alert("Erreur IndexedDB");
+  };
+}
+
+initDB();
+
+
+// ======================
+// COMPTEUR
+// ======================
+
+function updateCounter(){
+  const tx    = db.transaction(STORE_NAME,"readonly");
+  const store = tx.objectStore(STORE_NAME);
+  const req   = store.count();
+  req.onsuccess = function(){
+    document.getElementById("count").innerText = req.result;
+  };
+}
+
+
+// ======================
+// BOUTON GPS
+// ======================
+
+function handleGPS(){
+  if(ADDWP_TYPE===1){
+    document.getElementById("wpPopup").style.display = "block";
+  } else {
+    pendingWP = "none";
+    savePosition();
+  }
+}
+
+
+// ======================
+// SELECTION WP
+// ======================
+
+function selectWP(type){
+  pendingWP = type;
+  document.getElementById("wpPopup").style.display = "none";
+  savePosition();
+}
+
+
+// ======================
+// ENREGISTRER POSITION
+// ======================
+
+function savePosition(){
+
+  if(!navigator.geolocation){
+    alert("GPS non disponible");
+    return;
+  }
+
+  document.getElementById("status").innerText = "⏳ Acquisition GPS...";
+
+  navigator.geolocation.getCurrentPosition(
+
+    function(pos){
+
+      const point = {
+        user_key  : USER_KEY,
+        timestamp : mysqlTimestamp(),
+        latitude  : pos.coords.latitude,
+        longitude : pos.coords.longitude,
+        accuracy  : pos.coords.accuracy,
+        altitude  : pos.coords.altitude,
+        wp_type   : pendingWP
+      };
+
+      const tx    = db.transaction(STORE_NAME,"readwrite");
+      const store = tx.objectStore(STORE_NAME);
+
+      store.add(point);
+
+      tx.oncomplete = function(){
+        document.getElementById("status").innerText =
+          "✅ Enregistré à "+formatFR(point.timestamp);
+        updateCounter();
+        checkAutoExport();
+      };
+
+      tx.onerror = function(){
+        alert("Erreur sauvegarde");
+      };
+
+    },
+
+    function(err){
+      document.getElementById("status").innerText = "❌ Erreur GPS";
+      alert("Erreur GPS : "+err.message);
+    },
+
+    {
+      enableHighAccuracy : true,
+      maximumAge         : 0,
+      timeout            : 10000
+    }
+  );
+}
+
+
+// ======================
+// EXPORT JSON
+// ======================
+
+function exportJSON(){
+
+  const tx    = db.transaction(STORE_NAME,"readonly");
+  const store = tx.objectStore(STORE_NAME);
+  const req   = store.getAll();
+
+  req.onsuccess = function(){
+
+    const data = req.result;
+    if(data.length===0){
+      alert("Aucun point à exporter.");
+      return;
+    }
+
+    const json = JSON.stringify(data,null,2);
+    const blob = new Blob([json],{type:"application/json"});
+    const url  = URL.createObjectURL(blob);
+
+    const a        = document.createElement("a");
+    const filename = "gps_export_"+Date.now()+".json";
+
+    a.href     = url;
+    a.download = filename;
+    a.click();
+
+    URL.revokeObjectURL(url);
+
+    document.getElementById("status").innerText =
+      "💾 Export : "+filename;
+  };
+}
+
+
+// ======================
+// EXPORT AUTO
+// ======================
+
+function checkAutoExport(){
+  const tx    = db.transaction(STORE_NAME,"readonly");
+  const store = tx.objectStore(STORE_NAME);
+  const req   = store.count();
+  req.onsuccess = function(){
+    if(req.result % AUTO_EXPORT_EVERY===0){
+      exportJSON();
+    }
+  };
+}
+
+
+// ======================
+// EXPORT FERMETURE
+// ======================
+
+window.addEventListener("beforeunload",function(){
+  exportJSON();
+});
+
+
+// ======================
+// RAZ COMPLETE
+// ======================
+
+function resetDatabase(){
+
+  if(!confirm("⚠️ Confirmer la RAZ complète ?\n\nExport puis suppression.")){
+    return;
+  }
+
+  exportJSON();
+
+  setTimeout(function(){
+
+    db.close();
+
+    const deleteRequest = indexedDB.deleteDatabase(DB_NAME);
+
+    deleteRequest.onsuccess = function(){
+      document.getElementById("status").innerText = "🗑️ Base effacée.";
+      initDB();
+    };
+
+    deleteRequest.onerror = function(){
+      alert("Erreur suppression base");
+    };
+
+  },500);
+}
+
+
+// ======================
+// BOUTONS
+// ======================
+
+document.getElementById("btnGps").addEventListener("click",handleGPS);
+document.getElementById("btnExport").addEventListener("click",exportJSON);
+document.getElementById("btnReset").addEventListener("click",resetDatabase);
+
+</script>
+
+</body>
+</html>
